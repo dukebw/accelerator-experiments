@@ -48,4 +48,17 @@ comptime PIPELINE_STAGES = 4
 
 
 def main() -> None:
-    pass
+    __comptime_assert (K % Q_BLOCK) == 0, "K must be divisible by Q_BLOCK"
+
+    print("M = ", M, ", N = ", N, ", K = ", K, ", Q_BLOCK = ", Q_BLOCK)
+
+    # Allocate host memory.
+    h_A = List[Float32](unsafe_uninit_length=M * K)
+    h_B = List[Float32](unsafe_uninit_length=N * K)
+    h_A_fp8 = List[Float8_e4m3fn](unsafe_uninit_length=M * K)
+    h_B_fp8 = List[Float8_e4m3fn](unsafe_uninit_length=N * K)
+    h_A_sc = List[Float8_e8m0fnu](unsafe_uninit_length=M * NUM_BLOCKS)
+    h_B_sc = List[Float8_e8m0fnu](unsafe_uninit_length=N * NUM_BLOCKS)
+
+    h_C = List[Float32](unsafe_uninit_length=M * N)
+    h_C_ref = List[Float32](unsafe_uninit_length=M * N)
