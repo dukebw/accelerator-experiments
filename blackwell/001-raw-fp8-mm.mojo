@@ -20,6 +20,9 @@
 #     - Warp 2: lanes 64-95
 #     - Warp 3: lanes 96-127
 
+import itertools
+from random import randn, seed
+
 # Global dimension
 comptime N = 128
 comptime M = 128
@@ -62,3 +65,21 @@ def main() -> None:
 
     h_C = List[Float32](unsafe_uninit_length=M * N)
     h_C_ref = List[Float32](unsafe_uninit_length=M * N)
+
+    print("Allocated host memory!")
+
+    seed(42)
+
+    # Initialize host A matrix.
+    randn(h_A.unsafe_ptr(), M * K, mean=0.0, standard_deviation=1.0)
+    randn(h_B.unsafe_ptr(), M * K, mean=0.0, standard_deviation=1.0)
+
+    # Quantize host A matrix.
+    @parameter
+    for m, b_idx in itertools.product(range(M), range(NUM_BLOCKS)):
+        # Get block absolute maximum.
+        amax = abs(h_A[m * K + b_idx * Q_BLOCK])
+
+        @parameter
+        for i in range(1, Q_BLOCK):
+            amax = max(amax, abs(h_A[(m * K) + (b_idx * Q_BLOCK) + i]))
