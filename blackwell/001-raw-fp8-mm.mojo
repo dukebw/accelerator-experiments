@@ -21,7 +21,6 @@
 #     - Warp 3: lanes 96-127
 
 import itertools
-from builtin.simd import _convert_f32_to_float8_ue8m0_scalar
 from random import randn, seed
 
 # Global dimension
@@ -72,8 +71,8 @@ def main() -> None:
     seed(42)
 
     # Initialize host A matrix.
-    randn(h_A.unsafe_ptr(), M * K, mean=0.0, standard_deviation=1.0)
-    randn(h_B.unsafe_ptr(), M * K, mean=0.0, standard_deviation=1.0)
+    randn(h_A.unsafe_ptr(), M * K, mean=0.0, standard_deviation=10.0)
+    randn(h_B.unsafe_ptr(), M * K, mean=0.0, standard_deviation=10.0)
 
     # Quantize host A matrix.
     @parameter
@@ -85,10 +84,7 @@ def main() -> None:
         for i in range(1, Q_BLOCK):
             amax = max(amax, abs(h_A[(m * K) + (b_idx * Q_BLOCK) + i]))
 
-        # TODO: This should do ceilf(log2f(amax / DEST_MAX)) with round to +inf & clamp to [2^-127, 2^127].
-        # h_A_sc[m * K + b_idx * Q_BLOCK] = _convert_f32_to_float8_ue8m0_scalar[
-        #     DType.float8_e8m0fnu
-        # ](amax / DEST_MAX)
+        # This does ceilf(log2f(amax / DEST_MAX)) with round to +inf & clamp to [2^-127, 2^127].
         h_A_sc[m * K + b_idx * Q_BLOCK] = Float8_e8m0fnu(amax / DEST_MAX)
         print(
             "actual",
@@ -100,4 +96,7 @@ def main() -> None:
         # Quantize.
         @parameter
         for i in range(1, Q_BLOCK):
-            pass
+            h_A_fp8[(m * K) + (b_idx * Q_BLOCK) + i] = Float8_e4m3fn(
+                h_A[(m * K) + (b_idx * Q_BLOCK) + i]
+                / Float32(h_A_sc[m * K + b_idx * Q_BLOCK])
+            )
