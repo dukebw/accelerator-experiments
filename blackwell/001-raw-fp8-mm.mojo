@@ -21,6 +21,7 @@
 #     - Warp 3: lanes 96-127
 
 import itertools
+from builtin.simd import _convert_f32_to_float8_ue8m0_scalar
 from random import randn, seed
 
 # Global dimension
@@ -83,3 +84,20 @@ def main() -> None:
         @parameter
         for i in range(1, Q_BLOCK):
             amax = max(amax, abs(h_A[(m * K) + (b_idx * Q_BLOCK) + i]))
+
+        # TODO: This should do ceilf(log2f(amax / DEST_MAX)) with round to +inf & clamp to [2^-127, 2^127].
+        # h_A_sc[m * K + b_idx * Q_BLOCK] = _convert_f32_to_float8_ue8m0_scalar[
+        #     DType.float8_e8m0fnu
+        # ](amax / DEST_MAX)
+        h_A_sc[m * K + b_idx * Q_BLOCK] = Float8_e8m0fnu(amax / DEST_MAX)
+        print(
+            "actual",
+            amax / DEST_MAX,
+            "stored",
+            h_A_sc[m * K + b_idx * Q_BLOCK],
+        )
+
+        # Quantize.
+        @parameter
+        for i in range(1, Q_BLOCK):
+            pass
