@@ -21,6 +21,7 @@
 #     - Warp 3: lanes 96-127
 
 import itertools
+from gpu.host import DeviceContext
 from random import randn, seed
 
 # Global dimension
@@ -208,5 +209,22 @@ def main() -> None:
     print("\nQuantization error analysis:")
     print("  Max absolute error:", max_abs_error)
     print("  Max relative error:", max_rel_error)
+
+    with DeviceContext() as ctx:
+        # Allocate device memory.
+        d_A_fp8 = ctx.enqueue_create_buffer[DType.float8_e4m3fn](M * K)
+        d_B_fp8 = ctx.enqueue_create_buffer[DType.float8_e4m3fn](K * N)
+        d_A_sc = ctx.enqueue_create_buffer[DType.float8_e8m0fnu](M * NUM_BLOCKS)
+        d_B_sc = ctx.enqueue_create_buffer[DType.float8_e8m0fnu](N * NUM_BLOCKS)
+        d_C = ctx.enqueue_create_buffer[DType.float8_e8m0fnu](M * N)
+        print("Allocated device memory")
+
+        # Copy data to device.
+        ctx.enqueue_copy(d_A_fp8, h_A_fp8.unsafe_ptr())
+        ctx.enqueue_copy(d_B_fp8, h_B_fp8.unsafe_ptr())
+        ctx.enqueue_copy(d_A_sc, h_A_sc.unsafe_ptr())
+        ctx.enqueue_copy(d_B_sc, h_B_sc.unsafe_ptr())
+        ctx.enqueue_memset(d_C, val=0)
+        print("Copied data to device")
 
     print("\nDone!")
