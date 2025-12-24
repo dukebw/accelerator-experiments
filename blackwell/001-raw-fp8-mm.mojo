@@ -22,7 +22,10 @@
 
 import itertools
 from gpu.host import DeviceContext
+from gpu.host.nvidia.tma import TensorMapSwizzle, create_tma_descriptor
 from random import randn, seed
+from sys import size_of
+from utils.index import Index
 
 # Global dimension
 comptime N = 128
@@ -226,5 +229,38 @@ def main() -> None:
         ctx.enqueue_copy(d_B_sc, h_B_sc.unsafe_ptr())
         ctx.enqueue_memset(d_C, val=0)
         print("Copied data to device")
+
+    # Create tensor map descriptor for matrix A.
+    comptime tma_dim = 5
+    comptime swizzle_bytes = 32
+    comptime swizzle_elements = swizzle_bytes // size_of[DType.float8_e4m3fn]()
+    comptime tma_swizzle = {
+        32: TensorMapSwizzle.SWIZZLE_32B,
+        64: TensorMapSwizzle.SWIZZLE_64B,
+        128: TensorMapSwizzle.SWIZZLE_128B,
+    }
+    __comptime_assert (
+        K % swizzle_elements == 0
+    ), "K must be divisible by the number of swizzle elements"
+
+    # Manual 5D plumbing to create TMA descriptor using a thing wrapper.
+    A_tmap = create_tma_descriptor[
+        # Always use all 5 dims.
+        rank=tma_dim,
+        swizzle_mode = tma_swizzle.get(
+            swizzle_bytes, TensorMapSwizzle.SWIZZLE_NONE
+        ),
+    ](
+        d_A_fp8,
+        global_shape=(1, 1, K // swizzle_elements, M, swizzle_elements),
+        global_strides=(M * K, M * K, swizzle_elements, K, 1),
+        shared_mem_shape=(
+            1,
+            1,
+            TILE_K // swizzle_elements,
+            TILE_M,
+            swizzle_elements,
+        ),
+    )
 
     print("\nDone!")
