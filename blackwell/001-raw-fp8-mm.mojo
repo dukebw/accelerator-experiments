@@ -21,8 +21,13 @@
 #     - Warp 3: lanes 96-127
 
 import itertools
+from gpu import block_dim, block_idx, grid_dim, thread_idx
 from gpu.host import DeviceContext
-from gpu.host.nvidia.tma import TensorMapSwizzle, create_tma_descriptor
+from gpu.host.nvidia.tma import (
+    TensorMapSwizzle,
+    TMADescriptor,
+    create_tma_descriptor,
+)
 from random import randn, seed
 from sys import size_of
 from utils.index import Index
@@ -52,6 +57,21 @@ comptime NUM_THREADS = WARPGROUP_THREADS * NUM_WARPGROUPS
 comptime MAX_SHARED_MEMORY = 227000  # Hopper/Blackwell
 comptime DYNAMIC_SHARED_MEMORY = MAX_SHARED_MEMORY - 1000
 comptime PIPELINE_STAGES = 4
+
+
+@__llvm_arg_metadata(A_tmap, `nvvm.grid_constant`)
+@__llvm_arg_metadata(B_tmap, `nvvm.grid_constant`)
+fn kernel(A_tmap: TMADescriptor, B_tmap: TMADescriptor) -> None:
+    print(
+        "Block:",
+        block_idx.x,
+        "/",
+        grid_dim.x,
+        " thread: ",
+        thread_idx.x,
+        "/",
+        block_dim.x,
+    )
 
 
 fn quantize_fp8_blockwise(
@@ -230,37 +250,71 @@ def main() -> None:
         ctx.enqueue_memset(d_C, val=0)
         print("Copied data to device")
 
-    # Create tensor map descriptor for matrix A.
-    comptime tma_dim = 5
-    comptime swizzle_bytes = 32
-    comptime swizzle_elements = swizzle_bytes // size_of[DType.float8_e4m3fn]()
-    comptime tma_swizzle = {
-        32: TensorMapSwizzle.SWIZZLE_32B,
-        64: TensorMapSwizzle.SWIZZLE_64B,
-        128: TensorMapSwizzle.SWIZZLE_128B,
-    }
-    __comptime_assert (
-        K % swizzle_elements == 0
-    ), "K must be divisible by the number of swizzle elements"
+        # Create tensor map descriptor for matrix A.
+        comptime tma_dim = 5
+        comptime swizzle_bytes = 32
+        comptime swizzle_elements = swizzle_bytes // size_of[
+            DType.float8_e4m3fn
+        ]()
+        comptime tma_swizzle = {
+            32: TensorMapSwizzle.SWIZZLE_32B,
+            64: TensorMapSwizzle.SWIZZLE_64B,
+            128: TensorMapSwizzle.SWIZZLE_128B,
+        }
+        __comptime_assert (
+            K % swizzle_elements == 0
+        ), "K must be divisible by the number of swizzle elements"
 
-    # Manual 5D plumbing to create TMA descriptor using a thing wrapper.
-    A_tmap = create_tma_descriptor[
-        # Always use all 5 dims.
-        rank=tma_dim,
-        swizzle_mode = tma_swizzle.get(
-            swizzle_bytes, TensorMapSwizzle.SWIZZLE_NONE
-        ),
-    ](
-        d_A_fp8,
-        global_shape=(1, 1, K // swizzle_elements, M, swizzle_elements),
-        global_strides=(M * K, M * K, swizzle_elements, K, 1),
-        shared_mem_shape=(
-            1,
-            1,
-            TILE_K // swizzle_elements,
-            TILE_M,
-            swizzle_elements,
-        ),
-    )
+        # Manual 5D plumbing to create TMA descriptor using a thing wrapper.
+        A_tmap = create_tma_descriptor[
+            # Always use all 5 dims.
+            rank=tma_dim,
+            swizzle_mode = tma_swizzle.get(
+                swizzle_bytes, TensorMapSwizzle.SWIZZLE_NONE
+            ),
+        ](
+            d_A_fp8,
+            global_shape=(1, 1, K // swizzle_elements, M, swizzle_elements),
+            global_strides=(M * K, M * K, swizzle_elements, K, 1),
+            shared_mem_shape=(
+                1,
+                1,
+                TILE_K // swizzle_elements,
+                TILE_M,
+                swizzle_elements,
+            ),
+        )
 
-    print("\nDone!")
+        B_tmap = create_tma_descriptor[
+            # Always use all 5 dims.
+            rank=tma_dim,
+            swizzle_mode = tma_swizzle.get(
+                swizzle_bytes, TensorMapSwizzle.SWIZZLE_NONE
+            ),
+        ](
+            d_B_fp8,
+            global_shape=(1, 1, K // swizzle_elements, N, swizzle_elements),
+            global_strides=(N * K, N * K, swizzle_elements, K, 1),
+            shared_mem_shape=(
+                1,
+                1,
+                TILE_K // swizzle_elements,
+                TILE_N,
+                swizzle_elements,
+            ),
+        )
+
+        ctx.enqueue_function_checked[kernel, kernel](
+            d_A_fp8,
+            d_A_sc,
+            A_tmap,
+            d_B_fp8,
+            d_B_sc,
+            B_tmap,
+            d_C,
+            grid_dim=148,
+            block_dim=1,
+        )
+        ctx.synchronize()
+
+        print("\nDone!")
