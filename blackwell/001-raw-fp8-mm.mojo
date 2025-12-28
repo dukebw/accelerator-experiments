@@ -22,7 +22,7 @@
 
 import itertools
 from gpu import block_dim, block_idx, grid_dim, thread_idx
-from gpu.host import DeviceContext
+from gpu.host import DeviceContext, FuncAttribute
 from gpu.host.nvidia.tma import (
     TensorMapSwizzle,
     TMADescriptor,
@@ -312,8 +312,11 @@ def main() -> None:
             d_B_sc,
             B_tmap,
             d_C,
-            grid_dim=148,
-            block_dim=1,
+            grid_dim=SM_COUNT,
+            block_dim=NUM_THREADS,
+            func_attribute=FuncAttribute.MAX_DYNAMIC_SHARED_SIZE_BYTES(
+                DYNAMIC_SHARED_MEMORY
+            ),
         )
         ctx.synchronize()
 
